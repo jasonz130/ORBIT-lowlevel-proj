@@ -2,7 +2,6 @@
 #define VECTORS_H
 #include <math.h>
 
-
 typedef struct _2D_double_vector_struct
 {
   double x;
@@ -15,15 +14,39 @@ typedef struct _3D_double_vector_struct
   double z;
 } vectorX;
 
+//Vector Structure subroutine definitions
+void initialize_vector (vector* self);
+void initialize_vectorX (vectorX* self);
+vector scale_vector (vector self, double scale);
+vectorX scale_vectorX (vectorX self, double scale);
+vector add_vector (vector a, vector b);
+vectorX add_vectorX (vectorX a, vectorX b);
+vector sub_vector (vector a, vector b);
+vectorX sub_vectorX (vectorX a, vectorX b);
+vector rsb_vector (vector a, vector b);
+vectorX rsb_vectorX (vectorX a, vectorX b);
+double mag_vector (vector self);
+double mag_vectorX (vectorX self);
+double dot_prod_vector (vector a, vector b);
+double dot_prod_vectorX (vectorX a, vectorX b);
+vectorX cross_prod_vector (vector a, vector b);
+vectorX cross_prod_vectorX (vectorX a, vectorX b);
+double angle_vector (vector a, vector b);  //in radians
+double angle_vectorX (vectorX a, vectorX b); //in radians
+vector unit_vector (vector self);
+vectorX unit_vectorX (vectorX self);
+vector make2D_vectorX(vectorX self);
+vectorX make3D_vector(vector self);
 
-void initialize_vector (vector self) {
-  self.x = 0;
-  self.y = 0;
+
+void initialize_vector (vector* self) {
+  (*self).x = 0;
+  (*self).y = 0;
 }
-void initialize_vectorX (vectorX self) {
-  self.x = 0;
-  self.y = 0;
-  self.z = 0;
+void initialize_vectorX (vectorX* self) {
+  (*self).x = 0;
+  (*self).y = 0;
+  (*self).z = 0;
 }
 
 
@@ -189,9 +212,21 @@ double angle_vectorX (vectorX a, vectorX b) {
 
 
 vector unit_vector (vector self) {
+  double mag = mag_vector(self);
+  if ( mag == 0) {
+    vector out;
+    initialize_vector(&out);
+    return out;
+  }
   return scale_vector(self, 1/mag_vector(self));
 }
 vectorX unit_vectorX (vectorX self) {
+  double mag = mag_vectorX(self);
+  if ( mag == 0) {
+    vectorX out;
+    initialize_vectorX(&out);
+    return out;
+  }
   return scale_vectorX(self, 1/mag_vectorX(self));
 }
 
