@@ -33,11 +33,11 @@
 #define RESOLUTION_X 320
 #define RESOLUTION_Y 240
 
-//#define ABS(x) (((x) > 0) ? (x) : -(x))
 
 //animation constant definitions
 #define BOX_LEN 2
 #define NUM_BOXES 8
+#define SATELLITE_SIZE      3
 
 //Constants for satellite shifting and scalings
 #define r_x_shift           64000000
@@ -64,7 +64,7 @@ void clear_box(int x, int y);
 void clear_drawn(int x0, int y0, int x1, int y1);
 void clear_screen();
 void draw_line(int x0, int y0, int x1, int y1, short int line_color);
-void draw_body(int x, int y, short int color);
+void draw_body(int x, int y, int size, short int color);
 void plot_pixel(int x, int y, short int line_color);
 void swap(int* val1, int* val2);
 void wait_for_vsync();
@@ -93,10 +93,13 @@ vectorX unit_vectorX (vectorX self);
 vector make2D_vectorX(vectorX self);
 vectorX make3D_vector(vector self);
 
+// Condition Checks subroutine initializaiton
+void check_cen_body_touch(int x_body, int y_body, int x_cen_body, int y_cen_body, bool *loop_condition);
 
 
 // Back-end subroutine initializations
 void elliptical_orbit (double init_pos, double init_velocity, double central_mass);
+void check_out_bounds(int x, int y, bool *pause_display_condition);
 
 
 
@@ -107,26 +110,29 @@ volatile int pixel_buffer_start; // global variable
 
 int main(void)
 {
-    //Back-end parameter initializations (to be replaced and initialized using switches and keys)
-    double init_pos = -64000000;
-    double init_vel = -2000;
-    double central_mass = 6 * pow(10, 24);
+  //Back-end parameter initializations (to be replaced and initialized using switches and keys)
+  double init_pos = -24000000;
+  double init_vel = -2000;
+  double central_mass = 6 * pow(10, 24);
 
 
-    //=======VGA initializations======
-    volatile int * pixel_ctrl_ptr = (int *)0xFF203020;
-    *(pixel_ctrl_ptr + 1) = 0xC8000000; //on-chip memory -> back-buffer
-    wait_for_vsync(); //swapping front and back buffers
-    pixel_buffer_start = *pixel_ctrl_ptr; //initialize a pointer to the pixel buffer, used by drawing functions
-    clear_screen(); // pixel_buffer_start points to the pixel buffer
-    *(pixel_ctrl_ptr + 1) = 0xC0000000; //set back pixel buffer to start of SDRAM memory
-    pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
-    clear_screen();
+  //=======VGA initializations======
+  volatile int * pixel_ctrl_ptr = (int *)0xFF203020;
+  *(pixel_ctrl_ptr + 1) = 0xC8000000; //on-chip memory -> back-buffer
+  wait_for_vsync(); //swapping front and back buffers
+  pixel_buffer_start = *pixel_ctrl_ptr; //initialize a pointer to the pixel buffer, used by drawing functions
+  clear_screen(); // pixel_buffer_start points to the pixel buffer
+  *(pixel_ctrl_ptr + 1) = 0xC0000000; //set back pixel buffer to start of SDRAM memory
+  pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
+  clear_screen();
 
 
 	//=======Begin Body of Program======
 	vector cen_pos;
 	initialize_vector(&cen_pos);
+  cen_pos.x = r_x_shift / r_x_scale;
+  cen_pos.y = r_y_shift / r_y_scale;
+
 	
 	vector sat_pos;
 	initialize_vector(&sat_pos);
@@ -140,7 +146,7 @@ int main(void)
 	initialize_vector(&sat_vel);
 	sat_vel.y = init_vel;
 	
-    double satellite_mass = 15000.0;
+  double satellite_mass = 15000.0;
 	
 	vector r;
 	initialize_vector(&r);
@@ -148,16 +154,16 @@ int main(void)
 	vector rhat;
 	initialize_vector(&rhat);
 	
-    double rmag;
+  double rmag;
+  double G = 6.67 * pow(10, -11);
 
-    double G = 6.67 * pow(10, -11);
 	vector Fgrav;
 	initialize_vector(&Fgrav);
 
-    double dt = 600;
-    double t = 0.0;
+  double dt = 600;
+  double t = 0.0;
 
-    /* Displayed objects location declarations */
+  //Displayed objects location declarations
 	vector sat1_prev;
 	sat1_prev.x = 0;
 	sat1_prev.y = 0;
@@ -166,57 +172,89 @@ int main(void)
 	sat1_prev2.y = 0;
 
 
-    // DRAW INITIAL CENTRAL BODY
+  // DRAW INITIAL CENTRAL BODY
 
-    /* Superloop */
-    while (1)
-    {
-        /* STEP 1: Erase any boxes and lines that were drawn in the previous previous iteration */
-        clear_box(sat1_prev2.x, sat1_prev2.y);
 
-        /* STEP 2: Draw current body */
-        draw_body(sat_pos_scaled.x, sat_pos_scaled.y, WHITE);
+  bool loop_condition = true;
+  bool pause_display_condition = false;
 
-        /* STEP 3: Set previous previous location to previous */
-        sat1_prev2.x = sat1_prev.x;
-        sat1_prev2.y = sat1_prev.y;
+  /* Superloop */
+  while (loop_condition)
+  {
+    check_cen_body_touch(sat_pos_scaled.x, sat_pos_scaled.y, cen_pos.x, cen_pos.y, &loop_condition);
+    check_out_bounds(sat_pos_scaled.x, sat_pos_scaled.y, &pause_display_condition);
+    
 
-        /* STEP 4: Set previous location to current */
-        sat1_prev.x = sat_pos_scaled.x;
-        sat1_prev.y = sat_pos_scaled.y;
+    /* STEP 1: Erase any boxes and lines that were drawn in the previous previous iteration */
+    if (pause_display_condition == false) clear_box(sat1_prev2.x, sat1_prev2.y);
 
-        /* STEP 5: Increment current location */
+    /* STEP 2: Draw current body */
+    if (pause_display_condition == false){
+      draw_body(sat_pos_scaled.x, sat_pos_scaled.y, SATELLITE_SIZE, WHITE);
+    }
+    else {
+      // X borders
+      for (int x_idx = 0; x_idx < RESOLUTION_X; x_idx++){
+          for (int y_idx = 0; y_idx < 15; y_idx++){
+              plot_pixel(x_idx, y_idx, BLACK);
+          }
+          for (int y_idx = 220; y_idx < RESOLUTION_Y; y_idx++){
+              plot_pixel(x_idx, y_idx, BLACK);
+          }
+      }
+      // Y borders
+      for (int y_idx = 0; y_idx < RESOLUTION_Y; y_idx++){
+          for (int x_idx = 0; x_idx < 20; x_idx++){
+              plot_pixel(x_idx, y_idx, BLACK);
+          }
+          for (int x_idx = 300; x_idx < RESOLUTION_X; x_idx++){
+              plot_pixel(x_idx, y_idx, BLACK);
+          }
+      }
+    }
+
+    /* STEP 3: Set previous previous location to previous */
+    sat1_prev2.x = sat1_prev.x;
+    sat1_prev2.y = sat1_prev.y;
+
+    /* STEP 4: Set previous location to current */
+    sat1_prev.x = sat_pos_scaled.x;
+    sat1_prev.y = sat_pos_scaled.y;
+
+    draw_body(cen_pos.x, cen_pos.y, 5, YELLOW);
+    
     /* ============================================ Back-end =============================================*/
 
-        r.x = sat_pos.x - cen_pos.x;
-        r.y = sat_pos.y - cen_pos.y;
+    /* STEP 5: Increment current location */
+    r.x = sat_pos.x - cen_pos.x;
+    r.y = sat_pos.y - cen_pos.y;
 
-        rmag = mag_vector(r);
-        
+    rmag = mag_vector(r);
+      
 		rhat = unit_vector (r);
         
 		Fgrav.x = -1 * G * ((central_mass * satellite_mass) / (rmag * rmag)) * rhat.x;
 		Fgrav.y = -1 * G * ((central_mass * satellite_mass) / (rmag * rmag)) * rhat.y;
 
-        sat_vel.x = sat_vel.x + (Fgrav.x / satellite_mass) * dt;
-        sat_vel.y = sat_vel.y + (Fgrav.y / satellite_mass) * dt;
+    sat_vel.x = sat_vel.x + (Fgrav.x / satellite_mass) * dt;
+    sat_vel.y = sat_vel.y + (Fgrav.y / satellite_mass) * dt;
 
-        sat_pos.x = sat_pos.x + sat_vel.x * dt;
-        sat_pos.y = sat_pos.y + sat_vel.y * dt;
+    sat_pos.x = sat_pos.x + sat_vel.x * dt;
+    sat_pos.y = sat_pos.y + sat_vel.y * dt;
 
-        sat_pos_scaled.x = round((sat_pos.x + r_x_shift) / r_x_scale);
-        sat_pos_scaled.y = round((sat_pos.y + r_y_shift) / r_y_scale);
+    sat_pos_scaled.x = round((sat_pos.x + r_x_shift) / r_x_scale);
+    sat_pos_scaled.y = round((sat_pos.y + r_y_shift) / r_y_scale);
 
-        t = t + dt;
+    t = t + dt;
 
-        printf("%0.5lf\n", sat_pos.x);
+    printf("%0.5lf\n", sat_pos_scaled.x);
 
     /* ===================================================================================================*/
 
-        /* STEP 6: APPLY VSYNC */
-        wait_for_vsync(); // swap front and back buffers on VGA vertical sync
-        pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer   
-    }
+    /* STEP 6: APPLY VSYNC */
+    wait_for_vsync(); // swap front and back buffers on VGA vertical sync
+    pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer   
+  }
 }
 
 
@@ -228,10 +266,12 @@ int main(void)
 /*
 HELPER FUNCTION DEFINITIONS
 */
-void draw_body(int x, int y, short int color){
-    for (int i = x; i < x + 3; i++){
-        for (int j = y; j < y + 3; j++){
-            plot_pixel(i, j, WHITE);
+
+//VGA subroutines
+void draw_body(int x, int y, int size, short int color){
+    for (int i = x; i < x + size; i++){
+        for (int j = y; j < y + size; j++){
+            plot_pixel(i, j, color);
         }
     }
 }
@@ -317,6 +357,38 @@ void clear_box(int x, int y){
     }
 }
 
+//Condition Subroutines
+void check_out_bounds(int x, int y, bool *pause_display_condition){
+    // box hit y (vertical) border
+    for (int i = x; i < x + 3; i++){
+        if (i < 0 || i > RESOLUTION_X-1){
+            *pause_display_condition = true;
+            return;
+        }
+    }
+    
+    // box hit x (horizontal) border
+    for (int i = y; i < y + 3; i++){
+        if (i < 0 || i > RESOLUTION_Y-1){
+            *pause_display_condition = true;
+            return;
+        }
+    }
+    *pause_display_condition = false;
+}
+
+void check_cen_body_touch(int x_body, int y_body, int x_cen_body, int y_cen_body, bool *loop_condition){
+    for (int x = x_cen_body; x < x_cen_body + 5; x++){
+        for (int y = y_cen_body; y < y_cen_body + 5; y++){
+            if (((x_body == x) && (y_body == y)) || ((x_body + 1 == x) && (y_body == y)) || ((x_body + 2 == x) && (y_body == y)) ||
+                ((x_body == x) && (y_body + 1 == y)) || ((x_body + 1 == x) && (y_body + 1 == y)) || ((x_body + 2 == x) && (y_body + 1 == y)) ||
+                ((x_body == x) && (y_body + 2 == y)) || ((x_body + 1 == x) && (y_body + 2 == y)) || ((x_body + 2 == x) && (y_body + 2 == y)))                
+                *loop_condition = false;
+        }
+    }
+}
+
+//Vector Subroutines
 void initialize_vector (vector* self) {
   (*self).x = 0;
   (*self).y = 0;
@@ -524,5 +596,3 @@ vectorX make3D_vector(vector self) {
 
   return final;
 }
-
-
