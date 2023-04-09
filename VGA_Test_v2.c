@@ -133,7 +133,7 @@ int main(void)
   initialize_vector(&launch_vel);
   launch_vel.y = 12;
 
-
+  //displayed object position parameters
   double hole_mass = 100;
 	vector hole_pos;
 	initialize_vector(&hole_pos);
@@ -163,17 +163,10 @@ int main(void)
 	vector Fgrav;
 	initialize_vector(&Fgrav);
 
-  double dt = 1/60; //screen refresh is 60hz
+  double dt = 0.25; //empirically found
 
-  /*
-  //Displayed objects location declarations
-	vector sat1_prev;
-	sat1_prev.x = 0;
-	sat1_prev.y = 0;
-	vector sat1_prev2;
-	sat1_prev2.x = 0;
-	sat1_prev2.y = 0;
-  */
+	vector sat_pos_prev, sat_pos_prev2;
+  sat_pos_prev2 = sat_pos_prev = sat_pos;
 
 
   bool loop_condition = true;
@@ -182,24 +175,30 @@ int main(void)
 
   //initialize display for 1st frame of animation
   draw_body(hole_pos.x, hole_pos.y, 5, YELLOW);
-  wait_for_vsync();
-  pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer 
-  draw_body(hole_pos.x, hole_pos.y, 5, YELLOW);
-  draw_body(sat_pos.x, sat_pos.y, SATELLITE_SIZE, WHITE);
-  wait_for_vsync();
-  pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer 
+  wait_for_vsync(); //must write hole body to both buffers...use vsync to accomplish this
+  pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
+  draw_body(hole_pos.x, hole_pos.y, 5, YELLOW); //2nd write
 
   /* Superloop */
   while (loop_condition)
   {
+    //TODO: finish implementing out-of-frame checks and collision checks after frame handling is completed
     //check_hole_body_touch(sat_pos_scaled.x, sat_pos_scaled.y, hole_pos.x, hole_pos.y, &loop_condition);
     //check_out_bounds(sat_pos_scaled.x, sat_pos_scaled.y, &pause_display_condition);
     
 
     /* STEP 1: Erase any boxes and lines that were drawn in the previous previous iteration */
-    clear_box(sat_pos.x, sat_pos.y, SATELLITE_SIZE);
+    clear_box(sat_pos_prev2.x, sat_pos_prev2.y, SATELLITE_SIZE);
 
-    /* STEP 2: Increment Values at Current Location */
+    /* STEP 2: Draw Current Body*/
+    draw_body(sat_pos.x, sat_pos.y, SATELLITE_SIZE, WHITE);
+
+    /* STEP 3: Update Previous Store*/
+    sat_pos_prev2 = sat_pos_prev;
+    sat_pos_prev = sat_pos;
+
+
+    /* STEP 4: Increment Values at Current Location */
     r.x = sat_pos.x - hole_pos.x;
     r.y = sat_pos.y - hole_pos.y;
 
@@ -215,11 +214,10 @@ int main(void)
 
     sat_pos.x = sat_pos.x + sat_vel.x * dt;
     sat_pos.y = sat_pos.y + sat_vel.y * dt;
-    draw_body(sat_pos.x, sat_pos.y, SATELLITE_SIZE, WHITE);
 
-    /* STEP 3: Wait for VSYNC */
+    /* STEP 5: Wait for VSYNC */
     wait_for_vsync();
-    pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer   
+    pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
 
 
     printf("%0.5lf\n", sat_pos.x);
