@@ -33,11 +33,11 @@
 #define RESOLUTION_X 320
 #define RESOLUTION_Y 240
 
-//#define ABS(x) (((x) > 0) ? (x) : -(x))
 
 //animation constant definitions
 #define BOX_LEN 2
 #define NUM_BOXES 8
+#define SATELLITE_SIZE      3
 
 //Constants for satellite shifting and scalings
 #define r_x_shift           64000000
@@ -60,11 +60,11 @@ typedef struct _3D_double_vector_struct
 } vectorX; //3d vector
 
 //VGA subroutine initializations
-void clear_box(int x, int y);
+void clear_box(int x, int y, int size);
 void clear_drawn(int x0, int y0, int x1, int y1);
 void clear_screen();
 void draw_line(int x0, int y0, int x1, int y1, short int line_color);
-void draw_body(int x, int y, short int color);
+void draw_body(int x, int y, int size, short int color);
 void plot_pixel(int x, int y, short int line_color);
 void swap(int* val1, int* val2);
 void wait_for_vsync();
@@ -93,10 +93,12 @@ vectorX unit_vectorX (vectorX self);
 vector make2D_vectorX(vectorX self);
 vectorX make3D_vector(vector self);
 
-
+// Condition Checks subroutine initializaiton
+void check_hole_body_touch(int x_body, int y_body, int x_hole_body, int y_hole_body, bool *loop_condition);
+void check_out_bounds(int x, int y, bool *pause_display_condition);
 
 // Back-end subroutine initializations
-void elliptical_orbit (double init_pos, double init_velocity, double central_mass);
+
 
 
 
@@ -107,40 +109,47 @@ volatile int pixel_buffer_start; // global variable
 
 int main(void)
 {
-    //Back-end parameter initializations (to be replaced and initialized using switches and keys)
-    double init_pos = -64000000;
-    double init_vel = -2000;
-    double central_mass = 6 * pow(10, 24);
+  //=======VGA initializations======
+  volatile int * pixel_ctrl_ptr = (int *)0xFF203020;
+  *(pixel_ctrl_ptr + 1) = 0xC8000000; //on-chip memory -> back-buffer
+  wait_for_vsync(); //swapping front and back buffers
+  pixel_buffer_start = *pixel_ctrl_ptr; //initialize a pointer to the pixel buffer, used by drawing functions
+  clear_screen(); // pixel_buffer_start points to the pixel buffer
+  *(pixel_ctrl_ptr + 1) = 0xC0000000; //set back pixel buffer to start of SDRAM memory
+  pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
+  clear_screen();
 
 
-    //=======VGA initializations======
-    volatile int * pixel_ctrl_ptr = (int *)0xFF203020;
-    *(pixel_ctrl_ptr + 1) = 0xC8000000; //on-chip memory -> back-buffer
-    wait_for_vsync(); //swapping front and back buffers
-    pixel_buffer_start = *pixel_ctrl_ptr; //initialize a pointer to the pixel buffer, used by drawing functions
-    clear_screen(); // pixel_buffer_start points to the pixel buffer
-    *(pixel_ctrl_ptr + 1) = 0xC0000000; //set back pixel buffer to start of SDRAM memory
-    pixel_buffer_start = *(pixel_ctrl_ptr + 1); // we draw on the back buffer
-    clear_screen();
+  
+  
 
 
 	//=======Begin Body of Program======
-	vector cen_pos;
-	initialize_vector(&cen_pos);
+  //Back-end parameter initializations (to be replaced and initialized using switches and keys)
+  vector launch_pos, launch_vel;
+  initialize_vector(&launch_pos);
+  launch_pos.x = RESOLUTION_X/2 - 32;
+  launch_pos.y = RESOLUTION_Y/2;
+  initialize_vector(&launch_vel);
+  launch_vel.y = 12;
+
+  //displayed object position parameters
+  double hole_mass = 100;
+	vector hole_pos;
+	initialize_vector(&hole_pos);
+  hole_pos.x = RESOLUTION_X/2;
+  hole_pos.y = RESOLUTION_Y/2;
+
 	
+  double satellite_mass = 10;
 	vector sat_pos;
 	initialize_vector(&sat_pos);
-	sat_pos.x = init_pos;
-	
-	vector sat_pos_scaled;
-	initialize_vector(&sat_pos_scaled);
+	sat_pos = launch_pos;
 	
 	
 	vector sat_vel;
 	initialize_vector(&sat_vel);
-	sat_vel.y = init_vel;
-	
-    double satellite_mass = 15000.0;
+	sat_vel = launch_vel;
 	
 	vector r;
 	initialize_vector(&r);
@@ -148,75 +157,73 @@ int main(void)
 	vector rhat;
 	initialize_vector(&rhat);
 	
-    double rmag;
+  double rmag;
+  double G = 46.08; //see additional documentation to see derivation of this parameter
 
-    double G = 6.67 * pow(10, -11);
 	vector Fgrav;
 	initialize_vector(&Fgrav);
 
-    double dt = 600;
-    double t = 0.0;
+  double dt = 0.25; //empirically found
 
-    /* Displayed objects location declarations */
-	vector sat1_prev;
-	sat1_prev.x = 0;
-	sat1_prev.y = 0;
-	vector sat1_prev2;
-	sat1_prev2.x = 0;
-	sat1_prev2.y = 0;
+	vector sat_pos_prev, sat_pos_prev2;
+  sat_pos_prev2 = sat_pos_prev = sat_pos;
 
 
-    // DRAW INITIAL CENTRAL BODY
+  bool loop_condition = true;
+  //bool pause_display_condition = false;
 
-    /* Superloop */
-    while (1)
-    {
-        /* STEP 1: Erase any boxes and lines that were drawn in the previous previous iteration */
-        clear_box(sat1_prev2.x, sat1_prev2.y);
 
-        /* STEP 2: Draw current body */
-        draw_body(sat_pos_scaled.x, sat_pos_scaled.y, WHITE);
+  //initialize display for 1st frame of animation
+  draw_body(hole_pos.x, hole_pos.y, 5, YELLOW);
+  wait_for_vsync(); //must write hole body to both buffers...use vsync to accomplish this
+  pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
+  draw_body(hole_pos.x, hole_pos.y, 5, YELLOW); //2nd write
 
-        /* STEP 3: Set previous previous location to previous */
-        sat1_prev2.x = sat1_prev.x;
-        sat1_prev2.y = sat1_prev.y;
+  /* Superloop */
+  while (loop_condition)
+  {
+    //TODO: finish implementing out-of-frame checks and collision checks after frame handling is completed
+    //check_hole_body_touch(sat_pos_scaled.x, sat_pos_scaled.y, hole_pos.x, hole_pos.y, &loop_condition);
+    //check_out_bounds(sat_pos_scaled.x, sat_pos_scaled.y, &pause_display_condition);
+    
 
-        /* STEP 4: Set previous location to current */
-        sat1_prev.x = sat_pos_scaled.x;
-        sat1_prev.y = sat_pos_scaled.y;
+    /* STEP 1: Erase any boxes and lines that were drawn in the previous previous iteration */
+    clear_box(sat_pos_prev2.x, sat_pos_prev2.y, SATELLITE_SIZE);
 
-        /* STEP 5: Increment current location */
-    /* ============================================ Back-end =============================================*/
+    /* STEP 2: Draw Current Body*/
+    draw_body(sat_pos.x, sat_pos.y, SATELLITE_SIZE, WHITE);
 
-        r.x = sat_pos.x - cen_pos.x;
-        r.y = sat_pos.y - cen_pos.y;
+    /* STEP 3: Update Previous Store*/
+    sat_pos_prev2 = sat_pos_prev;
+    sat_pos_prev = sat_pos;
 
-        rmag = mag_vector(r);
-        
+
+    /* STEP 4: Increment Values at Current Location */
+    r.x = sat_pos.x - hole_pos.x;
+    r.y = sat_pos.y - hole_pos.y;
+
+    rmag = mag_vector(r);
+      
 		rhat = unit_vector (r);
         
-		Fgrav.x = -1 * G * ((central_mass * satellite_mass) / (rmag * rmag)) * rhat.x;
-		Fgrav.y = -1 * G * ((central_mass * satellite_mass) / (rmag * rmag)) * rhat.y;
+		Fgrav.x = -1 * G * ((hole_mass * satellite_mass) / (rmag * rmag)) * rhat.x;
+		Fgrav.y = -1 * G * ((hole_mass * satellite_mass) / (rmag * rmag)) * rhat.y;
 
-        sat_vel.x = sat_vel.x + (Fgrav.x / satellite_mass) * dt;
-        sat_vel.y = sat_vel.y + (Fgrav.y / satellite_mass) * dt;
+    sat_vel.x = sat_vel.x + (Fgrav.x / satellite_mass) * dt;
+    sat_vel.y = sat_vel.y + (Fgrav.y / satellite_mass) * dt;
 
-        sat_pos.x = sat_pos.x + sat_vel.x * dt;
-        sat_pos.y = sat_pos.y + sat_vel.y * dt;
+    sat_pos.x = sat_pos.x + sat_vel.x * dt;
+    sat_pos.y = sat_pos.y + sat_vel.y * dt;
 
-        sat_pos_scaled.x = round((sat_pos.x + r_x_shift) / r_x_scale);
-        sat_pos_scaled.y = round((sat_pos.y + r_y_shift) / r_y_scale);
+    /* STEP 5: Wait for VSYNC */
+    wait_for_vsync();
+    pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer
 
-        t = t + dt;
 
-        printf("%0.5lf\n", sat_pos.x);
+    printf("%0.5lf\n", sat_pos.x);
 
-    /* ===================================================================================================*/
-
-        /* STEP 6: APPLY VSYNC */
-        wait_for_vsync(); // swap front and back buffers on VGA vertical sync
-        pixel_buffer_start = *(pixel_ctrl_ptr + 1); // new back buffer   
-    }
+    /* ===================================================================================================*/  
+  }
 }
 
 
@@ -228,10 +235,12 @@ int main(void)
 /*
 HELPER FUNCTION DEFINITIONS
 */
-void draw_body(int x, int y, short int color){
-    for (int i = x; i < x + 3; i++){
-        for (int j = y; j < y + 3; j++){
-            plot_pixel(i, j, WHITE);
+
+//VGA subroutines
+void draw_body(int x, int y, int size, short int color){
+    for (int i = x; i < x + size; i++){
+        for (int j = y; j < y + size; j++){
+            plot_pixel(i, j, color);
         }
     }
 }
@@ -309,14 +318,46 @@ void draw_line(int x0, int y0, int x1, int y1, short int line_color){
     }
 }
 
-void clear_box(int x, int y){
-    for (int i = x; i < x + 3; i++){
-        for (int j = y; j < y + 3; j++){
+void clear_box(int x, int y, int size){
+    for (int i = x; i < x + size; i++){
+        for (int j = y; j < y + size; j++){
             plot_pixel(i, j, BLACK);
         }
     }
 }
 
+//Condition Subroutines
+void check_out_bounds(int x, int y, bool *pause_display_condition){
+    // box hit y (vertical) border
+    for (int i = x; i < x + 3; i++){
+        if (i < 0 || i > RESOLUTION_X-1){
+            *pause_display_condition = true;
+            return;
+        }
+    }
+    
+    // box hit x (horizontal) border
+    for (int i = y; i < y + 3; i++){
+        if (i < 0 || i > RESOLUTION_Y-1){
+            *pause_display_condition = true;
+            return;
+        }
+    }
+    *pause_display_condition = false;
+}
+
+void check_hole_body_touch(int x_body, int y_body, int x_hole_body, int y_hole_body, bool *loop_condition){
+    for (int x = x_hole_body; x < x_hole_body + 5; x++){
+        for (int y = y_hole_body; y < y_hole_body + 5; y++){
+            if (((x_body == x) && (y_body == y)) || ((x_body + 1 == x) && (y_body == y)) || ((x_body + 2 == x) && (y_body == y)) ||
+                ((x_body == x) && (y_body + 1 == y)) || ((x_body + 1 == x) && (y_body + 1 == y)) || ((x_body + 2 == x) && (y_body + 1 == y)) ||
+                ((x_body == x) && (y_body + 2 == y)) || ((x_body + 1 == x) && (y_body + 2 == y)) || ((x_body + 2 == x) && (y_body + 2 == y)))                
+                *loop_condition = false;
+        }
+    }
+}
+
+//Vector Subroutines
 void initialize_vector (vector* self) {
   (*self).x = 0;
   (*self).y = 0;
@@ -524,5 +565,3 @@ vectorX make3D_vector(vector self) {
 
   return final;
 }
-
-
